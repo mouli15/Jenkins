@@ -1,0 +1,243 @@
+#!/bin/bash
+( echo "PROJECT_NAME,PLAN_NAME,PLAN_KEY,GROUP,USER,USERNAME,PERMISSION_TYPE" ) > Bamboo_Business_UAR.csv
+#Fetching projects count
+size=$(curl -u ${USERNAME}:${PASSWORD} -X GET "https://bamboo.srv.westpac.com.au/rest/api/latest/project.json?max-result=1"|awk -v FS='"size":' '{print $2}'|awk -F',' '{print $1}')
+#-------------------------------Get Project details-------------------------------#
+projectDetails()
+{
+#Fetching project details(name and key)
+projectDetails=("$(curl -u ${USERNAME}:${PASSWORD} -X GET "https://bamboo.srv.westpac.com.au/rest/api/latest/project.json?max-result=$size" |jq '.projects|.project[]|"\(.key),\(.name)"')")
+#projectDetails=( "A001FB,A001FB_1" )
+
+projectUserList $projectDetails
+projectGroupsList $projectDetails
+planDetails $projectDetails
+}
+#-------------------------------Get Project User list details-------------------------------#
+projectUserList()
+{
+IFS=$'\n'
+for var in ${projectDetails[*]}
+do
+#Fetching Project Key
+projectKey=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+#Fetching Project Name
+projectName=$(echo $var|awk -F',' '{print $2}'|cut -d '"' -f1)
+echo "project name $projectName"
+#Passing project key as input to get all individual users names and permissions of project
+userDetails=("$(curl -u ${USERNAME}:${PASSWORD} "https://bamboo.srv.westpac.com.au/rest/api/latest/permissions/project/$projectKey/users"| jq '.results[] | "\(.name),\(.fullName),\(.permissions | join("|"))"')")
+projectUserDetails $userDetails $projectName
+done
+}
+#-------------------------------Get Project User details-------------------------------#
+projectUserDetails()
+{
+IFS=$'\n'
+for var in ${userDetails[*]}
+do
+#Fetching Project individual User Id
+user=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+count=$(echo $var| grep -o "," | wc -l)
+echo "count is $count"
+
+if [[ "$count" == 2 ]]; then
+{
+#Fetching Project individual User Name
+userName=$(echo $var|awk -F',' '{print $2}')
+#Fetching Project individual User permission
+permission=$(echo $var|awk -F',' '{print $3}'|cut -d '"' -f1)
+}
+else
+{
+userName=$(echo $var|awk -F',' '{print $2 $3}')
+echo "username $userName1"
+permission=$(echo $var|awk -F',' '{print $4}'|cut -d '"' -f1)
+echo "permission $permission"
+}
+fi
+echo "$projectName,N/A,N/A,N/A,$user,$userName,$permission" >>Bamboo_Business_UAR.csv
+done
+}
+#-------------------------------Get Project Group list details-------------------------------#
+projectGroupsList()
+{
+IFS=$'\n'
+for var in ${projectDetails[*]}
+do
+#Fetching Project Key
+projectKey=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+#Fetching Project Name
+projectName=$(echo $var|awk -F',' '{print $2}'|cut -d '"' -f1)
+#Passing Project key as input to fetch all group names and permissions
+groupDetails=("$(curl -u ${USERNAME}:${PASSWORD} "https://bamboo.srv.westpac.com.au/rest/api/latest/permissions/project/$projectKey/groups" | jq '.results[] | "\(.name),\(.permissions | join("|"))"')")
+projectGroupDetails $groupDetails $projectName
+done
+}
+#-------------------------------Get Project Group User details-------------------------------#
+projectGroupDetails()
+{
+IFS=$'\n'
+for var in ${groupDetails[*]}
+do
+#Fetching Project Group Name
+groupName=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+#Fetching Project Group permission
+permission=$(echo $var|awk -F',' '{print $2}'|cut -d '"' -f1)
+group=$groupName
+#checking if group name contains spaces or not
+if [[ "$groupName" == *" "* ]]; then
+{
+groupName=$(echo "$groupName" | sed "s/ /%20/g")
+}
+fi
+#Passing group name as input to fetch all users of that group
+projectGroupUsers=("$(curl -u ${USERNAME}:${PASSWORD} "https://bamboo.srv.westpac.com.au/rest/api/latest/admin/groups/$groupName/more-members"| jq '.results[] |"\(.name),\(.fullName)"')")
+#Checking for project group users existence 
+if [[ -z ${projectGroupUsers[@]} ]]; then
+echo "$projectName,N/A,N/A,$group,N/A,N/A,$permission" >>Bamboo_Business_UAR.csv
+else
+for var in ${projectGroupUsers[@]}
+do
+#Fetching Project Group UserId
+userId=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+#Fetching Project Group UserName
+if [[ "$count" == 2 ]]; then
+{
+userName=$(echo $var|awk -F',' '{print $2}'|cut -d '"' -f1)
+}
+else
+{
+userName=$(echo $var|awk -F',' '{print $2 $3}'|cut -d '"' -f1)
+}
+fi
+echo "$projectName,N/A,N/A,$group,$userId,$userName,$permission" >>Bamboo_Business_UAR.csv
+done
+fi
+done
+}
+#-------------------------------Get Plan details-------------------------------#
+planDetails()
+{
+IFS=$'\n'
+for var in ${projectDetails[*]}
+do
+#Fetching Project Key
+projectKey=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+#Fetching Project Name
+projectName=$(echo $var|awk -F',' '{print $2}'|cut -d '"' -f1)
+#Passing Project key as input to fetch all plan keys and names
+planDetails=("$(curl -u ${USERNAME}:${PASSWORD} "https://bamboo.srv.westpac.com.au/rest/api/latest/project/$projectKey.json?expand=plans&max-result=43" |jq '.plans |.plan[] |"\(.key),\(.name)"')")
+planUserList $projectName $planDetails
+planGroupList $projectName $planDetails
+done
+}
+#-------------------------------Get Plan User list details-------------------------------#
+planUserList()
+{
+IFS=$'\n'
+for var in ${planDetails[*]}
+do
+#Fetching Plan Key
+planKey=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+#Fetching Plan Name
+planName=$(echo $var|awk -F',' '{print $2}'|cut -d '"' -f1)
+#Passing plan key as input to get all individual users names and permissions
+planuserDetails=("$(curl -u ${USERNAME}:${PASSWORD} "https://bamboo.srv.westpac.com.au/rest/api/latest/permissions/plan/$planKey/users"| jq '.results[] |"\(.name),\(.fullName),\(.permissions | join("|"))"')")
+planUserDetails $projectName $planName $planKey $planuserDetails
+done
+}
+#-------------------------------Get Plan User details-------------------------------#
+planUserDetails()
+{
+IFS=$'\n'
+for var in ${planuserDetails[@]}
+do
+#Fetching Plan individual User Id
+user=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+count=$(echo $var| grep -o "," | wc -l)
+echo "count is $count"
+if [[ "$count" == 2 ]]; then
+{
+#Fetching Plan individual User Name
+userName=$(echo $var|awk -F',' '{print $2}')
+#Fetching Plan individual User Permission
+permission=$(echo $var|awk -F',' '{print $3}'|cut -d '"' -f1)
+}
+else
+{
+#Fetching Plan individual User Name
+userName=$(echo $var|awk -F',' '{print $2 $3}')
+#Fetching Plan individual User Permission
+permission=$(echo $var|awk -F',' '{print $4}'|cut -d '"' -f1)
+}
+fi
+echo "$projectName,$planName,$planKey,N/A,$user,$userName,$permission" >>Bamboo_Business_UAR.csv
+done
+}
+#-------------------------------Get Plan group list-------------------------------#
+planGroupList()
+{
+IFS=$'\n'
+for var in ${planDetails[@]}
+do
+#Fetching Plan Key
+planKey=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+#Fetching Plan Name
+planName=$(echo $var|awk -F',' '{print $2}'|cut -d '"' -f1)
+#Passing Plan key as input to fetch all group names
+planGroupsList=("$(curl -u ${USERNAME}:${PASSWORD} "https://bamboo.srv.westpac.com.au/rest/api/latest/permissions/plan/$planKey/groups"|jq '.results[] | "\(.name),\(.permissions | join("|"))"')")
+planGroupDetails $projectName $planName $planKey $planGroupsList
+done
+}
+#-------------------------------Get Plan Group details-------------------------------#
+planGroupDetails()
+{
+IFS=$'\n'
+for var in ${planGroupsList[@]}
+do
+#Fetching Plan Group Name
+groupName=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+#Fetching Plan Group permission
+permissionType=$(echo $var|awk -F',' '{print $2}'|cut -d '"' -f1)
+group=$groupName
+#checking if group name contains spaces or not
+if [[ "$groupName" == *" "* ]]; then
+groupName=$(echo "$groupName" | sed "s/ /%20/g")
+fi
+#Fetching list of all plan group users name
+planGroupUsers=("$(curl -u ${USERNAME}:${PASSWORD} "https://bamboo.srv.westpac.com.au/rest/api/latest/admin/groups/$groupName/more-members"| jq '.results[] |"\(.name),\(.fullName)"')")
+#Checking for plan group user existence 
+if [[ -z ${planGroupUsers[@]} ]]; then
+echo "$projectName,$planName,$planKey,$group,N/A,N/A,$permissionType" >>Bamboo_Business_UAR.csv
+else
+{
+for var in ${planGroupUsers[@]}
+do
+#Fetching Plan Group UserId
+userId=$(echo $var|awk -F',' '{print $1}'|cut -d '"' -f2|cut -d '"' -f1)
+count=$(echo $var| grep -o "," | wc -l)
+echo "count is $count"
+
+if [[ "$count" == 2 ]]; then
+{
+#Fetching Plan Group UserName
+userName=$(echo $var|awk -F',' '{print $2}'|cut -d '"' -f1)
+}
+else
+{
+userName=$(echo $var|awk -F',' '{print $2 $3}'|cut -d '"' -f1)
+}
+fi
+echo "$projectName,$planName,$planKey,$group,$userId,$userName,$permissionType" >>Bamboo_Business_UAR.csv
+done
+}
+fi
+done
+}
+projectDetails
+echo "======================== Final CSV ==============================="
+cat Bamboo_Business_UAR.csv
+
+mkdir Report
+
+mv Bamboo_Business_UAR.csv Report/
